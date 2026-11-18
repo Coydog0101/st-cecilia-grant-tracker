@@ -197,13 +197,22 @@ def claude(prompt, *, schema=None, web=False, light=False, max_tokens=32000):
         }]
 
     client = anthropic.Anthropic()
+    all_blocks = []
     for _ in range(8):
         with client.beta.messages.stream(**kwargs) as stream:
             resp = stream.get_final_message()
+        all_blocks.extend(resp.content)
         if resp.stop_reason == "pause_turn":  # long web-search turn; let it continue
             kwargs["messages"] = kwargs["messages"] + [{"role": "assistant", "content": resp.content}]
             continue
         break
+    if web:
+        searches = sum(1 for b in all_blocks if b.type == "server_tool_use")
+        results = [b for b in all_blocks if b.type == "web_search_tool_result"]
+        errors = [getattr(r.content, "error_code", "?") for r in results if not isinstance(r.content, list)]
+        hits = sum(len(r.content) for r in results if isinstance(r.content, list))
+        log(f"    [{model}] stop={resp.stop_reason} searches={searches} results={hits} errors={errors} "
+            f"in={resp.usage.input_tokens} out={resp.usage.output_tokens}")
     if resp.stop_reason == "refusal":
         raise RuntimeError("Claude declined the request")
     if resp.stop_reason == "max_tokens":
@@ -250,7 +259,7 @@ def todays_areas():
     areas = ai.get("search_areas", [])
     if not areas:
         return []
-    per_run = max(1, min(int(ai.get("areas_per_run", len(areas))), len(areas)))
+    per_run = max(1, min(int(os.environ.get("SCAN_MAX_AREAS") or ai.get("areas_per_run", len(areas))), len(areas)))
     start = ((TODAY.toordinal() // 7) * per_run) % len(areas)
     return [areas[(start + i) % len(areas)] for i in range(per_run)]
 
@@ -283,7 +292,16 @@ Requirements:
 
 When you are done searching, finish your reply with ONE fenced ```json block containing an object of the form
 {{"opportunities": [{json.dumps(example)}]}}"""
-    return extract_json(claude(prompt, web=True, max_tokens=48000)).get("opportunities", [])
+    text = claude(prompt, web=True, max_tokens=48000)
+    try:
+        found = extract_json(text).get("opportunities", [])
+    except (ValueError, AttributeError) as exc:
+        log(f"    could not read JSON from answer: {exc}")
+        found = []
+    if not found:
+        snippet = re.sub(r"\s+", " ", text)[:600]
+        log(f"    answer had no opportunities. Start of answer: {snippet}")
+    return found
 
 
 def ai_screen_federal(hits):

@@ -5,7 +5,12 @@ on:
     # Wakes every Monday at 11:00 UTC (6:00 AM Central Standard / 5:00 AM daylight time);
     # the "gate" job lets it continue only every other week. GitHub may start a few minutes late.
     - cron: "0 11 * * 1"
-  workflow_dispatch: {}   # "Run workflow" button on the Actions tab - always runs
+  workflow_dispatch:      # "Run workflow" button on the Actions tab - always runs
+    inputs:
+      max_areas:
+        description: "Limit AI search areas (blank = all; use 1 for a cheap test)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -54,6 +59,7 @@ jobs:
           OLD_DASHBOARD_PASSWORD: ${{ secrets.OLD_DASHBOARD_PASSWORD }}
           GH_DATA_TOKEN: ${{ secrets.GH_DATA_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SCAN_MAX_AREAS: ${{ inputs.max_areas }}
         run: python scanner/scan.py
 
       - name: Commit results
