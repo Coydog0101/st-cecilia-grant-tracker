@@ -16,7 +16,7 @@ const $ = (sel) => document.querySelector(sel);
 const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 
 const S = {
-  password: '', who: '', data: null, grants: [], decisions: {}, decisionsSha: null,
+  password: '', who: '', data: null, grants: [], decisions: {}, activity: [], decisionsSha: null,
   tab: 'open', query: '', category: '', sort: 'deadline', showClosed: false, selected: null,
 };
 
@@ -76,11 +76,14 @@ function gh(path, opts = {}) {
 }
 function canSave() { return !!(S.data?.github?.token && S.data?.github?.repo); }
 
+const MAX_ACTIVITY = 5000;   // keep the newest events; older ones roll off
+
+/** Shared file: { decisions: {grantId: record}, activity: [event, ...] } */
 async function fetchDecisions() {
-  if (!canSave()) return { sha: null, decisions: {} };
+  if (!canSave()) return { sha: null, decisions: {}, activity: [] };
   const g = S.data.github;
   const r = await gh(`contents/${g.decisions_path}?ref=${encodeURIComponent(g.branch)}&t=${Date.now()}`);
-  if (r.status === 404) return { sha: null, decisions: {} };
+  if (r.status === 404) return { sha: null, decisions: {}, activity: [] };
   if (!r.ok) throw new Error(`GitHub returned ${r.status} reading decisions`);
   const j = await r.json();
   const env = JSON.parse(td.decode(b64decode(j.content.replace(/\s/g, ''))));
@@ -88,49 +91,83 @@ async function fetchDecisions() {
   try { data = await decryptEnvelope(env, S.password); } catch {
     throw new Error('The saved decisions could not be unlocked with this password.');
   }
-  return { sha: j.sha, decisions: data.decisions || {} };
+  return { sha: j.sha, decisions: data.decisions || {}, activity: data.activity || [] };
 }
 
 async function refreshDecisions() {
   try {
-    const { sha, decisions } = await fetchDecisions();
+    const { sha, decisions, activity } = await fetchDecisions();
     if (sha && sha === S.decisionsSha) return;
     S.decisionsSha = sha;
     S.decisions = decisions;
+    S.activity = activity;
     render();
   } catch (e) { toast(e.message, true); }
 }
 
-/** Replace one grant's record (status + notes) and save. */
-async function saveRecord(id, record, okMsg = 'Saved') {
+/** Read-modify-write the shared file, retrying if someone else saved first. */
+async function commitShared(mutate) {
+  const g = S.data.github;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const latest = await fetchDecisions();             // merge with what others saved
+    const next = mutate({ decisions: { ...latest.decisions }, activity: [...latest.activity] });
+    next.activity = next.activity.slice(-MAX_ACTIVITY);
+    const envelope = await encryptObject({ ...next, updated_at: new Date().toISOString() }, S.password);
+    const body = {
+      message: 'Update decisions',                     // never put names or grant details in public commit messages
+      content: b64encode(te.encode(JSON.stringify(envelope) + '\n')),
+      branch: g.branch,
+    };
+    if (latest.sha) body.sha = latest.sha;
+    const r = await gh(`contents/${g.decisions_path}`, { method: 'PUT', body: JSON.stringify(body) });
+    if (r.ok) {
+      const j = await r.json();
+      S.decisionsSha = j.content?.sha || null;
+      S.decisions = next.decisions;
+      S.activity = next.activity;
+      return;
+    }
+    if (r.status !== 409 && r.status !== 422) throw new Error(`GitHub returned ${r.status} while saving`);
+  }
+  throw new Error('Could not save (someone else was saving at the same time). Try again.');
+}
+
+function deviceLabel() {
+  const ua = navigator.userAgent;
+  const os = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android'
+    : /Windows/.test(ua) ? 'Windows' : /Mac OS X/.test(ua) ? 'Mac' : /CrOS/.test(ua) ? 'Chromebook' : 'Other';
+  const br = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+  return `${os} · ${br}`;
+}
+
+/** Record one visit per person per day per device (quietly; never blocks the page). */
+async function logVisit() {
+  if (!canSave() || !S.who) return;
+  const day = new Date().toLocaleDateString('en-CA');
+  const key = `stc-visit-${S.who.toLowerCase()}-${day}`;
+  if (store.get(key)) return;
+  try {
+    await commitShared((d) => { d.activity.push({ type: 'visit', by: S.who, at: new Date().toISOString(), device: deviceLabel() }); return d; });
+    store.set(key, '1', true);
+    if (S.tab === 'activity') render();
+  } catch { /* visit logging is best-effort */ }
+}
+
+/** Replace one grant's record (status + notes), log the action, and save. */
+async function saveRecord(id, record, okMsg = 'Saved', action = 'notes') {
   if (!canSave()) { toast('Saving is not set up yet (GH_DATA_TOKEN secret missing). See README.', true); return; }
   const before = S.decisions[id];
   S.decisions[id] = record;
   render();
-  const g = S.data.github;
+  const g = S.grants.find((x) => x.id === id);
   try {
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const latest = await fetchDecisions();          // merge with what others saved
-      const merged = { ...latest.decisions, [id]: record };
-      const envelope = await encryptObject({ decisions: merged, updated_at: new Date().toISOString() }, S.password);
-      const body = {
-        message: 'Update decisions',                   // never put grant details in public commit messages
-        content: b64encode(te.encode(JSON.stringify(envelope) + '\n')),
-        branch: g.branch,
-      };
-      if (latest.sha) body.sha = latest.sha;
-      const r = await gh(`contents/${g.decisions_path}`, { method: 'PUT', body: JSON.stringify(body) });
-      if (r.ok) {
-        const j = await r.json();
-        S.decisionsSha = j.content?.sha || null;
-        S.decisions = merged;
-        render();
-        toast(okMsg);
-        return;
-      }
-      if (r.status !== 409 && r.status !== 422) throw new Error(`GitHub returned ${r.status} while saving`);
-    }
-    throw new Error('Could not save (someone else was saving at the same time). Try again.');
+    await commitShared((d) => {
+      d.decisions[id] = record;
+      d.activity.push({ type: action, by: S.who || 'Someone', at: new Date().toISOString(), id, title: g?.title || '' });
+      return d;
+    });
+    render();
+    toast(okMsg);
   } catch (e) {
     if (before) S.decisions[id] = before; else delete S.decisions[id];
     render();
@@ -355,13 +392,107 @@ function renderSources() {
       <td>${esc(s.detail || '')}${safeUrl(s.url) ? ` · <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">page</a>` : ''}</td></tr>`).join('')}</table>`;
 }
 
+/* ------------------------------------------------------------------ activity */
+const DAY = 86400000;
+const ACTION_TEXT = { apply: 'moved to Applying', decline: 'declined', reopen: 'moved back to Opportunities', notes: 'updated notes on' };
+function describe(ev) {
+  if (ev.type === 'visit') return `opened the tracker${ev.device ? ` <span class="muted">(${esc(ev.device)})</span>` : ''}`;
+  const what = ev.type.startsWith('stage:') ? `set stage to <b>${esc(ev.type.slice(6))}</b> for` : (ACTION_TEXT[ev.type] || esc(ev.type));
+  return `${what} <a href="#" data-goto="${esc(ev.id || '')}">${esc(ev.title || 'an opportunity')}</a>`;
+}
+function weekStart(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+
+function renderActivity() {
+  const ev = S.activity || [];
+  const now = Date.now();
+  const visits = ev.filter((e) => e.type === 'visit');
+  const v30 = visits.filter((e) => now - new Date(e.at) <= 30 * DAY);
+  const people30 = new Set(v30.map((e) => e.by.trim().toLowerCase()));
+  const actions = ev.filter((e) => e.type !== 'visit');
+  const last = visits.length ? visits[visits.length - 1] : null;
+  const stat = (n, l, ic, cls = '') => `<div class="stat ${cls}"><div class="ic">${icon(ic)}</div><div><div class="n">${n}</div><div class="l">${l}</div></div></div>`;
+
+  // visits per week, last 12 weeks
+  const weeks = [];
+  const thisWeek = weekStart(new Date());
+  for (let i = 11; i >= 0; i--) { const s = new Date(thisWeek); s.setDate(s.getDate() - 7 * i); weeks.push({ start: s, n: 0, people: new Set() }); }
+  for (const e of visits) {
+    const ws = weekStart(new Date(e.at)).getTime();
+    const w = weeks.find((x) => x.start.getTime() === ws);
+    if (w) { w.n++; w.people.add(e.by.trim()); }
+  }
+  const max = Math.max(1, ...weeks.map((w) => w.n));
+  const W = 720, H = 180, padL = 28, padB = 26, padT = 12;
+  const bw = (W - padL) / weeks.length;
+  const ticks = [0, Math.ceil(max / 2), max].filter((v, i, a) => a.indexOf(v) === i);
+  const y = (v) => H - padB - (v / max) * (H - padB - padT);
+  const bars = weeks.map((w, i) => {
+    const x = padL + i * bw + 2, h = Math.max(0, H - padB - y(w.n)), barW = bw - 4;
+    const label = `Week of ${w.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}: ${w.n} visit${w.n === 1 ? '' : 's'}${w.people.size ? ' · ' + [...w.people].join(', ') : ''}`;
+    const r = Math.min(4, h / 2, barW / 2);
+    const path = h > 0 ? `M${x},${H - padB} v${-(h - r)} q0,${-r} ${r},${-r} h${barW - 2 * r} q${r},0 ${r},${r} v${h - r} z` : '';
+    return `<g class="bar" tabindex="0" data-tip="${esc(label)}"><rect x="${x - 2}" y="${padT}" width="${bw}" height="${H - padB - padT}" fill="transparent"/>
+      ${path ? `<path d="${path}"/>` : ''}
+      ${i % 2 === 1 || weeks.length <= 6 ? `<text x="${x + barW / 2}" y="${H - 8}" text-anchor="middle">${w.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</text>` : ''}</g>`;
+  }).join('');
+  const grid = ticks.map((t) => `<line x1="${padL}" x2="${W}" y1="${y(t)}" y2="${y(t)}"/><text x="${padL - 6}" y="${y(t) + 4}" text-anchor="end">${t}</text>`).join('');
+
+  // per-person table
+  const people = new Map();
+  for (const e of ev) {
+    const k = e.by.trim().toLowerCase();
+    const p = people.get(k) || { name: e.by.trim(), visits: 0, v30: 0, actions: 0, last: '', first: e.at, devices: new Set() };
+    if (e.type === 'visit') { p.visits++; if (now - new Date(e.at) <= 30 * DAY) p.v30++; if (e.device) p.devices.add(e.device); } else p.actions++;
+    if (e.at > p.last) p.last = e.at;
+    people.set(k, p);
+  }
+  const rows = [...people.values()].sort((a, b) => b.last.localeCompare(a.last));
+  const recent = ev.slice(-30).reverse();
+
+  $('#activity-body').innerHTML = `
+    <div class="stats stats-flat">
+      ${stat(v30.length, 'Visits in the last 30 days', 'list')}
+      ${stat(people30.size, 'People in the last 30 days', 'spark')}
+      ${stat(actions.length, 'Decisions & notes saved', 'pen', 'good')}
+      ${stat(last ? esc(fmtDate(last.at)) : '—', last ? `Last visit · ${esc(last.by)}` : 'No visits yet', 'cal', 'datestat')}
+    </div>
+    <div class="panel">
+      <h3>Visits per week</h3>
+      <p class="muted small">One visit is counted per person, per device, per day. Hover a bar for names.</p>
+      <div class="chart-wrap"><svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Visits per week for the last 12 weeks">${grid}${bars}</svg>
+        <div class="chart-tip" id="chart-tip" hidden></div></div>
+    </div>
+    <div class="act-grid">
+      <div class="panel">
+        <h3>Who’s using it</h3>
+        ${rows.length ? `<table class="people"><thead><tr><th>Name</th><th>Visits (30 days)</th><th>All visits</th><th>Actions</th><th>Last seen</th></tr></thead>
+          <tbody>${rows.map((p) => `<tr><td><b>${esc(p.name)}</b><div class="muted small">${esc([...p.devices].join(', '))}</div></td><td>${p.v30}</td><td>${p.visits}</td><td>${p.actions}</td><td>${esc(fmtDateTime(p.last))}</td></tr>`).join('')}</tbody></table>`
+          : '<p class="muted">No activity recorded yet.</p>'}
+      </div>
+      <div class="panel">
+        <h3>Recent activity</h3>
+        ${recent.length ? `<ul class="feed">${recent.map((e) => `<li><span class="dot ${e.type === 'visit' ? '' : 'act'}"></span><div><b>${esc(e.by)}</b> ${describe(e)}<div class="muted small">${esc(fmtDateTime(e.at))}</div></div></li>`).join('')}</ul>`
+          : '<p class="muted">Nothing yet.</p>'}
+      </div>
+    </div>
+    <p class="muted small">Names are whatever each person types when unlocking. With one shared password, the tracker can’t verify who someone is.</p>`;
+}
+
 function render() {
   if (!S.data) return;
+  const onActivity = S.tab === 'activity';
+  $('#browse').hidden = onActivity;
+  $('#activity').hidden = !onActivity;
   // keep half-typed notes if the same item is re-rendered (e.g. background refresh)
   const ids = ['note', 'pros-note', 'cons-note'];
   const keep = { id: S.selected, status: statusOf(S.selected), focused: document.activeElement?.id };
   for (const i of ids) keep[i] = document.getElementById(i)?.value;
   renderStats();
+  if (onActivity) {
+    document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === S.tab)));
+    renderActivity();
+    return;
+  }
   renderList();
   renderDetail();
   if (keep.id === S.selected && keep.status === statusOf(S.selected)) {
@@ -415,13 +546,14 @@ function onDetailClick(e) {
     cons_note: $('#cons-note')?.value.trim() || '',
   };
   const base = { ...prev, ...notes };
-  if (act === 'apply') saveRecord(g.id, { ...base, status: 'applying', stage: prev.stage || 'Preparing', by, at: now }, 'Moved to Applying');
-  else if (act === 'decline') saveRecord(g.id, { ...base, status: 'declined', stage: undefined, by, at: now }, 'Moved to Declined');
-  else if (act === 'reopen') saveRecord(g.id, { ...base, status: 'open', stage: undefined, by, at: now }, 'Moved back to Opportunities');
+  if (act === 'apply') saveRecord(g.id, { ...base, status: 'applying', stage: prev.stage || 'Preparing', by, at: now }, 'Moved to Applying', 'apply');
+  else if (act === 'decline') saveRecord(g.id, { ...base, status: 'declined', stage: undefined, by, at: now }, 'Moved to Declined', 'decline');
+  else if (act === 'reopen') saveRecord(g.id, { ...base, status: 'open', stage: undefined, by, at: now }, 'Moved back to Opportunities', 'reopen');
   else if (act === 'save-notes') {
     const stage = $('#stage')?.value;
+    const stageChanged = stage && stage !== prev.stage;
     saveRecord(g.id, { ...base, status: prev.status || 'open', ...(stage ? { stage } : {}),
-      by: prev.by || by, at: prev.at || now, edited_by: by, edited_at: now }, 'Notes saved');
+      by: prev.by || by, at: prev.at || now, edited_by: by, edited_at: now }, 'Notes saved', stageChanged ? `stage:${stage}` : 'notes');
   }
 }
 
@@ -444,11 +576,12 @@ async function unlock(password, quiet = false) {
   render();
   await refreshDecisions();
   if (!canSave() && !quiet) toast('Viewing only: saving is not set up yet (see README).', true);
+  logVisit();
 }
 
 function lock() {
   store.clear('stc-pw');
-  S.password = ''; S.data = null; S.decisions = {}; S.decisionsSha = null; keyCache.clear(); writeSalt = null;
+  S.password = ''; S.data = null; S.decisions = {}; S.activity = []; S.decisionsSha = null; keyCache.clear(); writeSalt = null;
   $('#app').hidden = true; $('#lock').hidden = false; $('#pw').value = ''; $('#pw').focus();
 }
 
@@ -467,6 +600,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const pw = $('#pw').value;
     const remember = $('#remember').checked;
     S.who = $('#who').value.trim();
+    if (!S.who) { err.textContent = 'Please enter your name.'; err.hidden = false; btn.disabled = false; label.textContent = 'Unlock'; return; }
     store.set('stc-who', S.who, true);
     try {
       await unlock(pw);
@@ -478,8 +612,25 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#lock-btn').addEventListener('click', lock);
   document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => {
     S.tab = b.dataset.tab; S.selected = null; render();
-    $('#browse').scrollIntoView({ block: 'start' });
+    (S.tab === 'activity' ? $('#activity') : $('#browse')).scrollIntoView({ block: 'start' });
   }));
+  // Activity view: chart tooltips + links back to opportunities
+  const act = $('#activity');
+  const showTip = (g) => {
+    const tip = $('#chart-tip'); if (!tip || !g) return;
+    tip.textContent = g.dataset.tip; tip.hidden = false;
+    const box = g.getBoundingClientRect(), wrap = tip.parentElement.getBoundingClientRect();
+    tip.style.left = `${Math.min(Math.max(box.left - wrap.left + box.width / 2, 90), wrap.width - 90)}px`;
+    tip.style.top = `${box.top - wrap.top - 8}px`;
+  };
+  act.addEventListener('mouseover', (e) => showTip(e.target.closest('.bar')));
+  act.addEventListener('focusin', (e) => showTip(e.target.closest('.bar')));
+  act.addEventListener('mouseout', (e) => { if (e.target.closest('.bar')) { const t = $('#chart-tip'); if (t) t.hidden = true; } });
+  act.addEventListener('click', (e) => {
+    const a = e.target.closest('[data-goto]'); if (!a) return;
+    e.preventDefault();
+    if (S.grants.some((g) => g.id === a.dataset.goto)) select(a.dataset.goto); else toast('That opportunity is no longer in the list.');
+  });
   $('#search').addEventListener('input', (e) => { S.query = e.target.value; renderList(); });
   $('#category').addEventListener('change', (e) => { S.category = e.target.value; renderList(); });
   $('#sort').addEventListener('change', (e) => { S.sort = e.target.value; renderList(); });

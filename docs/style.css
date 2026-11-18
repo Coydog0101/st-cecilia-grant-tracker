@@ -290,3 +290,32 @@ label.check.small { font-size: 14px; white-space: nowrap; }
   .utility { font-size: 11px; letter-spacing: .06em; }
   .lock-card { padding: 24px 20px; }
 }
+
+/* ---------- activity ---------- */
+.small { font-size: 13px; }
+.stats-flat { margin-top: 0; }
+.stats-flat .stat { box-shadow: var(--shadow-sm); }
+.panel { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 22px; box-shadow: var(--shadow-sm); margin-top: 16px; }
+.panel h3 { font-family: var(--serif); font-size: 21px; font-weight: 600; color: var(--navy); margin-bottom: 4px; }
+.panel > p { margin: 0 0 10px; }
+.chart-wrap { position: relative; }
+.chart { width: 100%; height: auto; overflow: visible; }
+.chart line { stroke: var(--border); stroke-width: 1; }
+.chart text { font: 12px var(--sans); fill: var(--muted); }
+.chart .bar path { fill: var(--navy); transition: fill .15s; }
+.chart .bar:hover path, .chart .bar:focus path { fill: var(--jay); }
+.chart .bar:focus { outline: none; }
+.chart-tip { position: absolute; transform: translate(-50%, -100%); background: var(--ink); color: #fff; font-size: 13px; padding: 6px 10px; border-radius: 6px; pointer-events: none; width: max-content; max-width: 300px; white-space: normal; line-height: 1.4; }
+.act-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; }
+.people { width: 100%; border-collapse: collapse; font-size: 14px; margin-top: 8px; }
+.people th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; padding: 8px 8px 8px 0; border-bottom: 1.5px solid var(--border); }
+.people td { padding: 9px 8px 9px 0; border-bottom: 1px solid var(--border); vertical-align: top; font-variant-numeric: tabular-nums; }
+.feed { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 12px; max-height: 460px; overflow-y: auto; font-size: 14px; }
+.feed li { display: flex; gap: 10px; align-items: flex-start; }
+.feed .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--silver); margin-top: 6px; flex: none; }
+.feed .dot.act { background: var(--jay); }
+@media (max-width: 860px) {
+  .act-grid { grid-template-columns: minmax(0, 1fr); }
+  .people th:nth-child(3), .people td:nth-child(3) { display: none; }
+}
+.stat.datestat .n { font-size: 22px; }
