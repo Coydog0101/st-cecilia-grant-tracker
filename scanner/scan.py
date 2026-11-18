@@ -189,11 +189,15 @@ def claude(prompt, *, schema=None, web=False, light=False, max_tokens=32000):
         kwargs["betas"] = ["server-side-fallback-2026-07-01"]
         kwargs["fallbacks"] = "default"
     if web:
+        # The basic web search tool returns results straight to the model. The newer
+        # "dynamic filtering" variant (web_search_20260209) filters results in a hidden code
+        # step; in testing it used up the search budget there and the model saw nothing.
+        # Set "web_search_tool": "dynamic" in sources.json to try it again.
+        dynamic = ai.get("web_search_tool") == "dynamic" and not is_haiku
         kwargs["tools"] = [{
-            # Haiku uses the basic web search tool; Sonnet/Opus get the newer filtered one.
-            "type": "web_search_20250305" if is_haiku else "web_search_20260209",
+            "type": "web_search_20260209" if dynamic else "web_search_20250305",
             "name": "web_search",
-            "max_uses": int(ai.get("web_searches_per_area", 6)),
+            "max_uses": int(ai.get("web_searches_per_area", 10)),
         }]
 
     client = anthropic.Anthropic()
@@ -276,7 +280,7 @@ The school: {school()}
 Search area for this run: {area['name']}
 {area['focus']}
 
-Search the web thoroughly within this area for grant or funding opportunities this school could apply for that are currently open, opening in the next few months, recurring every year, or accepting applications on a rolling basis. Try several different searches (funder names, "grant" + "Catholic school", "private school eligible", "elementary school grant Louisiana", etc.) and open the funders' own pages to confirm.
+You have up to {int(ai.get("web_searches_per_area", 10))} web searches - use them, then answer. Search the web thoroughly within this area for grant or funding opportunities this school could apply for that are currently open, opening in the next few months, recurring every year, or accepting applications on a rolling basis. Try several different searches (funder names, "grant" + "Catholic school", "private school eligible", "elementary school grant Louisiana", etc.) and open the funders' own pages to confirm.
 
 {FIT_RULES}
 

@@ -9,7 +9,8 @@
     "light_effort": "low",
     "min_fit_score": 3,
     "areas_per_run": 8,
-    "web_searches_per_area": 6,
+    "web_searches_per_area": 10,
+    "web_search_tool": "basic",
     "search_areas": [
       {"name": "Acadiana & Lafayette funders", "focus": "Foundations, community foundations, family foundations and civic groups in Lafayette Parish and the Acadiana region (Lafayette, Broussard, Youngsville, Iberia, St. Martin, Vermilion, Acadia, St. Landry) that fund schools or children's education."},
       {"name": "Louisiana corporate giving", "focus": "Corporate giving programs and company foundations active in South Louisiana (utilities, energy, oil and gas service companies, banks, healthcare systems, retailers, grocery chains) that make grants to K-8 schools including private and parochial schools."},
