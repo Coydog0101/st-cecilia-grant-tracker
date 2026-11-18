@@ -1,0 +1,47 @@
+{
+  "school_profile": "St. Cecilia School, a private Catholic PreK-8 school (PreK through 8th grade, elementary and middle school) in Broussard, Louisiana (Lafayette Parish, Acadiana region), operated within the Roman Catholic Diocese of Lafayette. Nonprofit and tax-exempt through the Diocese. It is NOT a public school, high school, college, or school district. Typical funding needs: classroom technology, STEM and science, library and literacy, music and the arts (St. Cecilia is the patron saint of music), campus safety and security, facilities and capital improvements, playground and PE, school garden and nutrition, teacher professional development, tuition assistance for families, special-needs and learning support, and faith formation.",
+
+  "ai": {
+    "enabled": true,
+    "model": "claude-sonnet-5-5",
+    "effort": "medium",
+    "light_model": "claude-haiku-5-5",
+    "light_effort": "low",
+    "min_fit_score": 3,
+    "areas_per_run": 8,
+    "web_searches_per_area": 6,
+    "search_areas": [
+      {"name": "Acadiana & Lafayette funders", "focus": "Foundations, community foundations, family foundations and civic groups in Lafayette Parish and the Acadiana region (Lafayette, Broussard, Youngsville, Iberia, St. Martin, Vermilion, Acadia, St. Landry) that fund schools or children's education."},
+      {"name": "Louisiana corporate giving", "focus": "Corporate giving programs and company foundations active in South Louisiana (utilities, energy, oil and gas service companies, banks, healthcare systems, retailers, grocery chains) that make grants to K-8 schools including private and parochial schools."},
+      {"name": "Louisiana state programs", "focus": "State of Louisiana grant programs open to nonpublic / private / Catholic elementary and middle schools: school safety and security, arts in education, literacy, nonpublic school technology or textbook funds, early childhood (PreK) programs."},
+      {"name": "Catholic & faith-based funders", "focus": "Catholic and faith-based funders of Catholic elementary schools: national Catholic foundations, religious orders, Catholic fraternal organizations, Catholic school support organizations, and Gulf South Catholic foundations."},
+      {"name": "STEM & technology", "focus": "National grants for elementary and middle school STEM, science labs, robotics, coding, math and classroom technology that private and parochial K-8 schools or their teachers may apply for."},
+      {"name": "Literacy, libraries, music & arts", "focus": "National grants for elementary and middle school libraries, books, reading programs, music programs and instruments, and visual or performing arts that private and parochial schools or their teachers may apply for."},
+      {"name": "Facilities, safety, playground & health", "focus": "Grants for K-8 school playgrounds, PE equipment, school gardens, nutrition, campus security and safety upgrades, and building/capital improvements open to private and religious schools (including the Nonprofit Security Grant Program)."},
+      {"name": "Teachers & classroom grants", "focus": "Grants and awards that individual PreK-8 teachers at private or Catholic schools can apply for: classroom projects, professional development, field trips, special education supplies."}
+    ]
+  },
+
+  "grants_gov": {
+    "enabled": true,
+    "keywords": ["elementary school", "middle school", "early childhood education", "K-12 education", "school safety", "STEM education", "school library", "nonpublic school"],
+    "eligibilities": "12|25",
+    "max_results_per_keyword": 25
+  },
+
+  "watch_pages": [
+    {"funder": "Stuller Family Foundation", "url": "https://stullerfoundation.org/apply/"},
+    {"funder": "Community Foundation of Acadiana", "url": "https://cfacadiana.org/affiliate-grants"},
+    {"funder": "Community Foundation of Acadiana", "url": "https://www.cfacadiana.org/funds-and-impact/grants-scholarships-applications/angels-for-education/"},
+    {"funder": "Louisiana GOHSEP (security grants)", "url": "https://gohsep.la.gov/preparedness/preparedness-grants/"},
+    {"funder": "Louisiana Center for Safe Schools", "url": "https://lasafeschools.la.gov/"},
+    {"funder": "Louisiana Division of the Arts", "url": "https://www.crt.state.la.us/cultural-development/arts/grants/"},
+    {"funder": "Raskob Foundation for Catholic Activities", "url": "https://www.rfca.org/"},
+    {"funder": "Toshiba America Foundation", "url": "https://toshiba.com/taf/k5/"},
+    {"funder": "KaBOOM!", "url": "https://kaboom.org/become-a-partner/apply-for-a-grant/"},
+    {"funder": "Dollar General Literacy Foundation", "url": "https://www.dgliteracy.org/grant-programs/"},
+    {"funder": "Laura Bush Foundation for America's Libraries", "url": "https://www.bushcenter.org/topics/education/laura-bush-foundation-for-americas-libraries"},
+    {"funder": "Whole Foods Market Foundation", "url": "https://www.wholefoodsmarketfoundation.org/welcome/"},
+    {"funder": "Hancock Whitney", "url": "https://www.hancockwhitney.com/our-community-commitment"}
+  ]
+}

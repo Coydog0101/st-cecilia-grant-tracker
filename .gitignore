@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+# local test data - the real encrypted data is produced by the GitHub Action
+docs/data/
