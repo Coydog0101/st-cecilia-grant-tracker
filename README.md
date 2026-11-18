@@ -137,3 +137,9 @@ pip install -r scanner/requirements.txt
 DASHBOARD_PASSWORD=test-password-123 python scanner/scan.py --no-ai
 python -m http.server 8000 --directory docs   # open http://localhost:8000
 ```
+
+## Usage / activity page
+
+Who has opened the tracker, and what they've changed, is on its own page:
+`https://coydog0101.github.io/st-cecilia-grant-tracker/activity.html` (same shared password).
+It isn't linked from the main tracker. Opening it isn't counted as a visit.

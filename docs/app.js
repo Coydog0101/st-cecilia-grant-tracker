@@ -13,6 +13,7 @@ const NEW_DAYS = 15;  // scans run every other week
 const te = new TextEncoder();
 const td = new TextDecoder();
 const $ = (sel) => document.querySelector(sel);
+const PAGE = document.body.dataset.page || 'tracker';  // 'tracker' (index.html) or 'activity' (activity.html)
 const icon = (name) => `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
 
 const S = {
@@ -149,7 +150,6 @@ async function logVisit() {
   try {
     await commitShared((d) => { d.activity.push({ type: 'visit', by: S.who, at: new Date().toISOString(), device: deviceLabel() }); return d; });
     store.set(key, '1', true);
-    if (S.tab === 'activity') render();
   } catch { /* visit logging is best-effort */ }
 }
 
@@ -398,7 +398,7 @@ const ACTION_TEXT = { apply: 'moved to Applying', decline: 'declined', reopen: '
 function describe(ev) {
   if (ev.type === 'visit') return `opened the tracker${ev.device ? ` <span class="muted">(${esc(ev.device)})</span>` : ''}`;
   const what = ev.type.startsWith('stage:') ? `set stage to <b>${esc(ev.type.slice(6))}</b> for` : (ACTION_TEXT[ev.type] || esc(ev.type));
-  return `${what} <a href="#" data-goto="${esc(ev.id || '')}">${esc(ev.title || 'an opportunity')}</a>`;
+  return `${what} <a href="index.html#item=${encodeURIComponent(ev.id || '')}">${esc(ev.title || 'an opportunity')}</a>`;
 }
 function weekStart(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
 
@@ -480,19 +480,12 @@ function renderActivity() {
 
 function render() {
   if (!S.data) return;
-  const onActivity = S.tab === 'activity';
-  $('#browse').hidden = onActivity;
-  $('#activity').hidden = !onActivity;
+  if (PAGE === 'activity') { renderActivity(); return; }
   // keep half-typed notes if the same item is re-rendered (e.g. background refresh)
   const ids = ['note', 'pros-note', 'cons-note'];
   const keep = { id: S.selected, status: statusOf(S.selected), focused: document.activeElement?.id };
   for (const i of ids) keep[i] = document.getElementById(i)?.value;
   renderStats();
-  if (onActivity) {
-    document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === S.tab)));
-    renderActivity();
-    return;
-  }
   renderList();
   renderDetail();
   if (keep.id === S.selected && keep.status === statusOf(S.selected)) {
@@ -566,17 +559,34 @@ async function unlock(password, quiet = false) {
   try { S.data = await decryptEnvelope(env, password); } catch { throw new Error('That password didn’t work. Please try again.'); }
   S.password = password;
   S.grants = S.data.grants || [];
+  $('#who-label').textContent = S.who ? `Signed in as ${S.who}` : '';
+  if (PAGE === 'activity') {
+    $('#lock').hidden = true; $('#app').hidden = false;
+    await refreshDecisions();
+    render();
+    if (!canSave()) $('#activity-body').innerHTML = '<p class="muted">Activity tracking needs the GH_DATA_TOKEN secret (see README).</p>';
+    return;
+  }
   const cats = [...new Set(S.grants.map((g) => g.category).filter(Boolean))].sort();
   $('#category').innerHTML = '<option value="">All categories</option>' + cats.map((c) => `<option>${esc(c)}</option>`).join('');
   $('#scan-info').textContent = `${S.grants.length} opportunities tracked · last updated ${fmtDateTime(S.data.generated_at)}`;
-  $('#who-label').textContent = S.who ? `Signed in as ${S.who}` : '';
   renderSources();
   $('#lock').hidden = true;
   $('#app').hidden = false;
   render();
   await refreshDecisions();
   if (!canSave() && !quiet) toast('Viewing only: saving is not set up yet (see README).', true);
+  openFromHash();
   logVisit();
+}
+
+/** index.html#item=<id> (links from the Activity page) opens that opportunity. */
+function openFromHash() {
+  const m = location.hash.match(/^#item=(.+)$/);
+  if (!m) return;
+  const id = decodeURIComponent(m[1]);
+  history.replaceState(null, '', location.pathname);
+  if (S.grants.some((g) => g.id === id)) select(id); else toast('That opportunity is no longer in the list.');
 }
 
 function lock() {
@@ -610,11 +620,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   $('#lock-btn').addEventListener('click', lock);
-  document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => {
-    S.tab = b.dataset.tab; S.selected = null; render();
-    (S.tab === 'activity' ? $('#activity') : $('#browse')).scrollIntoView({ block: 'start' });
-  }));
-  // Activity view: chart tooltips + links back to opportunities
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && S.data) refreshDecisions(); });
+  setInterval(() => { if (S.data && !document.hidden) refreshDecisions(); }, 120000);
+  if (PAGE === 'activity') wireActivity(); else wireTracker();
+
+  const saved = store.get('stc-pw');
+  if (saved) {
+    try { await unlock(saved, true); } catch { store.clear('stc-pw'); }
+  }
+});
+
+function wireActivity() {
+  // chart tooltips
   const act = $('#activity');
   const showTip = (g) => {
     const tip = $('#chart-tip'); if (!tip || !g) return;
@@ -626,11 +643,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   act.addEventListener('mouseover', (e) => showTip(e.target.closest('.bar')));
   act.addEventListener('focusin', (e) => showTip(e.target.closest('.bar')));
   act.addEventListener('mouseout', (e) => { if (e.target.closest('.bar')) { const t = $('#chart-tip'); if (t) t.hidden = true; } });
-  act.addEventListener('click', (e) => {
-    const a = e.target.closest('[data-goto]'); if (!a) return;
-    e.preventDefault();
-    if (S.grants.some((g) => g.id === a.dataset.goto)) select(a.dataset.goto); else toast('That opportunity is no longer in the list.');
-  });
+}
+
+function wireTracker() {
+  window.addEventListener('hashchange', () => { if (S.data) openFromHash(); });
+  document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => {
+    S.tab = b.dataset.tab; S.selected = null; render();
+    $('#browse').scrollIntoView({ block: 'start' });
+  }));
   $('#search').addEventListener('input', (e) => { S.query = e.target.value; renderList(); });
   $('#category').addEventListener('change', (e) => { S.category = e.target.value; renderList(); });
   $('#sort').addEventListener('change', (e) => { S.sort = e.target.value; renderList(); });
@@ -639,11 +659,4 @@ document.addEventListener('DOMContentLoaded', async () => {
   $('#upcoming').addEventListener('click', (e) => { const b = e.target.closest('[data-jump]'); if (b) select(b.dataset.jump); });
   $('#detail').addEventListener('click', onDetailClick);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.body.classList.remove('show-detail'); });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && S.data) refreshDecisions(); });
-  setInterval(() => { if (S.data && !document.hidden) refreshDecisions(); }, 120000);
-
-  const saved = store.get('stc-pw');
-  if (saved) {
-    try { await unlock(saved, true); } catch { store.clear('stc-pw'); }
-  }
-});
+}
